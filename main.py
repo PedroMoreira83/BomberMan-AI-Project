@@ -4,8 +4,8 @@ import importlib
 import random
 import hashlib
 import json
-import csv  # NOVO
-import os   # NOVO
+import csv
+import os
 
 def gerar_checksum_dados(obj):
     def simplificar(o):
@@ -14,25 +14,17 @@ def gerar_checksum_dados(obj):
         elif isinstance(o, dict):
             return {k: simplificar(v) for k, v in o.items()}
         elif hasattr(o, '__dict__'):
-            # Para Player e Bomba, selecionamos os atributos essenciais
             if isinstance(o, Player):
                 return {
-                    'grid_x': o.grid_x,
-                    'grid_y': o.grid_y,
-                    'max_bombas': o.max_bombas,
-                    'bomba_nivel': o.bomba_nivel,
-                    'ativo': o.ativo,
-                    'time': o.time
+                    'grid_x': o.grid_x, 'grid_y': o.grid_y,
+                    'max_bombas': o.max_bombas, 'bomba_nivel': o.bomba_nivel,
+                    'ativo': o.ativo, 'time': o.time
                 }
             elif isinstance(o, Bomba):
                 return {
-                    'x': o.x,
-                    'y': o.y,
-                    'nivel': o.nivel,
-                    'explodida': o.explodida,
-                    'tempo_explosao': o.tempo_explosao,
-                    'tempo_fogo': o.tempo_fogo,
-                    'fogo': o.fogo
+                    'x': o.x, 'y': o.y, 'nivel': o.nivel,
+                    'explodida': o.explodida, 'tempo_explosao': o.tempo_explosao,
+                    'tempo_fogo': o.tempo_fogo, 'fogo': o.fogo
                 }
             else:
                 return str(o)
@@ -43,12 +35,9 @@ def gerar_checksum_dados(obj):
     json_data = json.dumps(dados_simplificados, sort_keys=True)
     return hashlib.md5(json_data.encode()).hexdigest()
 
-
-
-
 pygame.init()
 
-# ParÃ¢metros de jogo
+# Parâmetros de jogo
 TILE_SIZE = 48
 ROWS, COLS = 11, 13
 HUD_HEIGHT = 60
@@ -84,21 +73,17 @@ powerup_bomba_img = pygame.transform.scale(pygame.image.load("pu_bomb.jpg"), (TI
 powerup_fogo_img = pygame.transform.scale(pygame.image.load("pu_fire.jpg"), (TILE_SIZE, TILE_SIZE))
 bloco_img = pygame.transform.scale(pygame.image.load("bloco.jpg"), (TILE_SIZE, TILE_SIZE))
 
-# bomba_sprite.jpg com 3 frames de 48x48 lado a lado
 bomba_sprite = pygame.image.load("sprite_bomb_no_bg.png")
 bomb_frames = [
     pygame.transform.scale(bomba_sprite.subsurface(pygame.Rect(i * 48, 0, 48, 48)), (TILE_SIZE, TILE_SIZE))
     for i in range(3)
 ]
 
-# explosao.png com 5 frames de 48x48 lado a lado
 explosao_sprite = pygame.image.load("sprite_explosao.png").convert_alpha()
 explosao_frames = [
     explosao_sprite.subsurface(pygame.Rect(i * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE))
     for i in range(5)
 ]
-
-
 
 mapa = [
     [0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0],
@@ -119,30 +104,18 @@ font_vitoria = pygame.font.SysFont("Arial", 20, bold=True)
 
 def criar_powerup(x, y, prob_bomba=PROB_BOMBA, prob_fogo=PROB_FOGO):
     r = random.random()
-    if r < prob_bomba:
-        return 3
-    elif r < prob_bomba + prob_fogo:
-        return 4
+    if r < prob_bomba: return 3
+    elif r < prob_bomba + prob_fogo: return 4
     return 0
 
 def desenhar_hud(pontos, tempo_restante):
     pygame.draw.rect(screen, (30, 30, 30), (0, 0, WIDTH, HUD_HEIGHT))
     tempo_txt = font.render(f"Tempo: {int(tempo_restante)}s", True, (255, 255, 255))
     screen.blit(tempo_txt, (10, 10))
+    nomes = [p1, p2, p3, p4, p5]
     for i, p in enumerate(players):
         cor = COLOR_PLAYERS[i]
-        nome_jogador = ""
-        if i==0:
-            nome_jogador = p1
-        if i==1:
-            nome_jogador = p2    
-        if i==2:
-            nome_jogador = p3
-        if i==3:
-            nome_jogador = p4    
-        if i==4:
-            nome_jogador = p5  
-        txt = font.render(f"{nome_jogador}: {pontos[i]}", True, cor if p.ativo else (100, 100, 100))
+        txt = font.render(f"{nomes[i]}: {pontos[i]}", True, cor if p.ativo else (100, 100, 100))
         screen.blit(txt, (150 + i * 120, 10))
 
 class Bomba:
@@ -155,22 +128,17 @@ class Bomba:
         self.tempo_fogo = 0
         self.fogo = []
         self.dono = dono
-
-         # Para animaÃ§Ã£o
         self.anim_frame = 0
         self.anim_timer = 0
-        self.anim_interval = 0.2  # segundos por frame
+        self.anim_interval = 0.2
 
     def atualizar(self, delta_time):
         if not self.explodida:
             self.tempo_explosao -= delta_time
-
-            # Atualiza frame da bomba
             self.anim_timer += delta_time
             if self.anim_timer >= self.anim_interval:
                 self.anim_timer = 0
                 self.anim_frame = (self.anim_frame + 1) % len(bomb_frames)
-
             if self.tempo_explosao <= 0:
                 self.explodir()
         else:
@@ -184,13 +152,10 @@ class Bomba:
             for i in range(1 + (self.nivel - 1) * 2):
                 nx = self.x + dx * (i + 1)
                 ny = self.y + dy * (i + 1)
-                if not (0 <= nx < COLS and 0 <= ny < ROWS):
-                    break
-                if mapa[ny][nx] == 2:
-                    break
+                if not (0 <= nx < COLS and 0 <= ny < ROWS): break
+                if mapa[ny][nx] == 2: break
                 self.fogo.append((nx, ny))
-                if mapa[ny][nx] == 1:
-                    break
+                if mapa[ny][nx] == 1: break
         for fx, fy in self.fogo:
             for outra in bombas:
                 if not outra.explodida and (outra.x, outra.y) == (fx, fy):
@@ -207,7 +172,6 @@ class Player:
         self.tipo = tipo
         self.time = time
         
-        # Carrega spritesheet do jogador
         sprite_sheet = pygame.image.load(f"player{cor_id+1}.png").convert_alpha()
         self.frames = []
         for i in range(12):
@@ -218,7 +182,6 @@ class Player:
         self.anim_timer = 0
         self.anim_interval = 0.15
         self.ultima_direcao = "baixo"
-
 
         self.movendo = False
         self.tempo_mov = 0
@@ -234,25 +197,16 @@ class Player:
             return "parado"
         if self.tipo == "user":
             return get_acao_usuario(teclas)
-
         elif self.tipo == "ia" and self.ia_fn:
             self_state = {
-                'grid_x': self.grid_x,
-                'grid_y': self.grid_y,
-                'max_bombas': self.max_bombas,
-                'bombas_ativas': len(self.bombas),
-                'bomba_nivel': self.bomba_nivel,
-                'ativo': self.ativo,
+                'grid_x': self.grid_x, 'grid_y': self.grid_y,
+                'max_bombas': self.max_bombas, 'bombas_ativas': len(self.bombas),
+                'bomba_nivel': self.bomba_nivel, 'ativo': self.ativo,
             }
-
             hud_info = {
-                'tile_size': TILE_SIZE,
-                'rows': ROWS,
-                'cols': COLS,
-                'tempo_movimento': TEMPO_MOVIMENTO,
-                'tempo_explosao': TEMPO_EXPLOSAO,
-                'tempo_fogo': TEMPO_FOGO,
-                'max_bombas': MAX_BOMBAS,
+                'tile_size': TILE_SIZE, 'rows': ROWS, 'cols': COLS,
+                'tempo_movimento': TEMPO_MOVIMENTO, 'tempo_explosao': TEMPO_EXPLOSAO,
+                'tempo_fogo': TEMPO_FOGO, 'max_bombas': MAX_BOMBAS,
             }
 
             chks_player = gerar_checksum_dados(self)
@@ -264,25 +218,14 @@ class Player:
             acao = self.ia_fn(self, mapa, players, bombas, tempo_restante, pontos, hud_info, self_state)
 
             cheat = False
-            if gerar_checksum_dados(self) != chks_player:
-                print(f"[ALERTA] IA do jogador {players.index(self)+1} modificou o prÃ³prio objeto.")
-                cheat = True
-            if gerar_checksum_dados(mapa) != chks_mapa:
-                print(f"[ALERTA] IA do jogador {players.index(self)+1} modificou o mapa.")
-                cheat = True
-            if gerar_checksum_dados(players) != chks_players:
-                print(f"[ALERTA] IA do jogador {players.index(self)+1} modificou a lista de jogadores.")
-                cheat = True
-            if gerar_checksum_dados(bombas) != chks_bombas:
-                print(f"[ALERTA] IA do jogador {players.index(self)+1} modificou as bombas.")
-                cheat = True
-            if gerar_checksum_dados(pontos) != chks_pontos:
-                print(f"[ALERTA] IA do jogador {players.index(self)+1} modificou os pontos.")
-                cheat = True
+            if gerar_checksum_dados(self) != chks_player: cheat = True
+            if gerar_checksum_dados(mapa) != chks_mapa: cheat = True
+            if gerar_checksum_dados(players) != chks_players: cheat = True
+            if gerar_checksum_dados(bombas) != chks_bombas: cheat = True
+            if gerar_checksum_dados(pontos) != chks_pontos: cheat = True
 
             if cheat:
-                for p in players:
-                    p.tipo = "cheat"
+                for p in players: p.tipo = "cheat"
                 self.max_bombas = 10
                 return "bomba"
             return acao
@@ -292,16 +235,10 @@ class Player:
     def iniciar_movimento(self, dx, dy):
         self.grid_x += dx
         self.grid_y += dy
-
-        if dy == -1:
-            self.ultima_direcao = "cima"
-        elif dy == 1:
-            self.ultima_direcao = "baixo"
-        elif dx == -1:
-            self.ultima_direcao = "esquerda"
-        elif dx == 1:
-            self.ultima_direcao = "direita"
-
+        if dy == -1: self.ultima_direcao = "cima"
+        elif dy == 1: self.ultima_direcao = "baixo"
+        elif dx == -1: self.ultima_direcao = "esquerda"
+        elif dx == 1: self.ultima_direcao = "direita"
         self.dest_x = self.grid_x * TILE_SIZE
         self.dest_y = self.grid_y * TILE_SIZE
         self.movendo = True
@@ -316,13 +253,11 @@ class Player:
                 self.movendo = False
                 tipo = mapa[self.grid_y][self.grid_x]
                 if tipo == 3:
-                    if self.max_bombas < MAX_BOMBAS:
-                        self.max_bombas += 1
+                    if self.max_bombas < MAX_BOMBAS: self.max_bombas += 1
                     mapa[self.grid_y][self.grid_x] = 0
                     pontos[players.index(self)] += PONTOS_POWERUP_COLETADO
                 elif tipo == 4:
-                    if self.bomba_nivel < 4:
-                        self.bomba_nivel += 1
+                    if self.bomba_nivel < 4: self.bomba_nivel += 1
                     mapa[self.grid_y][self.grid_x] = 0
                     pontos[players.index(self)] += PONTOS_POWERUP_COLETADO
             else:
@@ -338,23 +273,6 @@ def get_acao_usuario(teclas):
     elif teclas[pygame.K_RIGHT]: return "direita"
     return "parado"
 
-# def desenhar_mapa():
-#     for y in range(ROWS):
-#         for x in range(COLS):
-#             val = mapa[y][x]
-#             pygame.draw.rect(screen, COLOR_GRASS, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE))
-#             if val == 0:
-#                 pygame.draw.rect(screen, COLOR_FLOOR, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE))
-#             elif val == 1:
-#                 pygame.draw.rect(screen, COLOR_BREAKABLE, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE))
-#             elif val == 2:
-#                 pygame.draw.rect(screen, COLOR_INDESTRUCTIBLE, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE))
-#             elif val == 3:
-#                 screen.blit(powerup_bomba_img, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT))
-#             elif val == 4:
-#                 screen.blit(powerup_fogo_img, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT))
-#             pygame.draw.rect(screen, COLOR_BG, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE), 1)
-
 def desenhar_mapa():
     for y in range(ROWS):
         for x in range(COLS):
@@ -363,7 +281,7 @@ def desenhar_mapa():
             if val == 0:
                 pygame.draw.rect(screen, COLOR_FLOOR, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE))
             elif val == 1:
-                screen.blit(bloco_img, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT))  # â¬ substituiÃ§Ã£o aqui
+                screen.blit(bloco_img, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT))
             elif val == 2:
                 pygame.draw.rect(screen, COLOR_INDESTRUCTIBLE, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE))
             elif val == 3:
@@ -372,27 +290,21 @@ def desenhar_mapa():
                 screen.blit(powerup_fogo_img, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT))
             pygame.draw.rect(screen, COLOR_BG, (x * TILE_SIZE, y * TILE_SIZE + HUD_HEIGHT, TILE_SIZE, TILE_SIZE), 1)
 
-
 def desenhar_jogadores(players):
     for p in players:
-        if not p.ativo:
-            continue
-
-        # Atualiza animaÃ§Ã£o
+        if not p.ativo: continue
         if p.movendo:
             p.anim_timer += 1
             if p.anim_timer >= 8:
                 p.anim_timer = 0
                 p.anim_frame = (p.anim_frame + 1) % 3
         else:
-            p.anim_frame = 0  # parado = 1Âº frame da direÃ§Ã£o
+            p.anim_frame = 0
 
         direcao_idx = {"cima": 0, "direita": 1, "baixo": 2, "esquerda": 3}
         base = direcao_idx[p.ultima_direcao] * 3
         frame = p.frames[base + p.anim_frame]
-
         screen.blit(frame, (p.pixel_x, p.pixel_y + HUD_HEIGHT))
-
 
 def desenhar_bombas(bombas):
     for b in bombas:
@@ -405,40 +317,21 @@ def desenhar_bombas(bombas):
                 pos_y = fy * TILE_SIZE + HUD_HEIGHT
 
                 if (fx, fy) == (b.x, b.y):
-                    # Centro da explosÃ£o
                     frame = explosao_frames[1]
                 elif fx == b.x:
                     if fy < b.y:
-                        # Cima
-                        if (fx, fy - 1) not in b.fogo:
-                            frame = explosao_frames[0]  # ponta cima
-                        else:
-                            frame = explosao_frames[3]  # corpo vertical
+                        frame = explosao_frames[0] if (fx, fy - 1) not in b.fogo else explosao_frames[3]
                     elif fy > b.y:
-                        # Baixo
-                        if (fx, fy + 1) not in b.fogo:
-                            frame = pygame.transform.rotate(explosao_frames[0], 180)  # ponta baixo
-                        else:
-                            frame = explosao_frames[3]  # corpo vertical
+                        frame = pygame.transform.rotate(explosao_frames[0], 180) if (fx, fy + 1) not in b.fogo else explosao_frames[3]
                 elif fy == b.y:
                     if fx > b.x:
-                        # Direita
-                        if (fx + 1, fy) not in b.fogo:
-                            frame = explosao_frames[2]  # ponta direita
-                        else:
-                            frame = explosao_frames[4]  # corpo horizontal
+                        frame = explosao_frames[2] if (fx + 1, fy) not in b.fogo else explosao_frames[4]
                     elif fx < b.x:
-                        # Esquerda
-                        if (fx - 1, fy) not in b.fogo:
-                            frame = pygame.transform.flip(explosao_frames[2], True, False)  # ponta esquerda
-                        else:
-                            frame = explosao_frames[4]  # corpo horizontal
+                        frame = pygame.transform.flip(explosao_frames[2], True, False) if (fx - 1, fy) not in b.fogo else explosao_frames[4]
                 else:
-                    # fallback para evitar crash (ex: posiÃ§Ã£o invÃ¡lida)
                     frame = explosao_frames[1]
 
                 screen.blit(pygame.transform.scale(frame, (TILE_SIZE, TILE_SIZE)), (pos_x, pos_y))
-
 
 p1 = "ia_jogador1"
 p2 = "ia_jogador2"
@@ -447,19 +340,24 @@ p4 = "ia_jogador4"
 p5 = "ia_jogador1"
 
 ia_1 = importlib.import_module(p1).decidir_acao
-ia_2 = importlib.import_module(p2).decidir_acao
-ia_3 = importlib.import_module(p3).decidir_acao
-ia_4 = importlib.import_module(p4).decidir_acao
-ia_5 = importlib.import_module(p5).decidir_acao
+
+# --- APRENDIZADO POR CURRÍCULO (SACOS DE PANCADA) ---
+# Substituímos a importação das outras IAs por uma função burra
+# para a sua IA (Jogador 1) treinar e matar com facilidade.
+def ia_saco_de_pancada(*args):
+    # Fica alternando movimentos simples e aleatórios sem soltar bombas
+    return random.choice(["cima", "baixo", "esquerda", "direita", "parado"])
 
 players = [
-    # params: psX, psY, tipo, time, cor, ativo?, ia
-    Player(0, 0, "ia", 0, 0, ativo=True, ia_fn=ia_1),
-    Player(12, 0, "ia", 1, 1, ativo=True, ia_fn=ia_2),
-    Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_3),
-    Player(12, 10, "ia", 0, 0, ativo=True, ia_fn=ia_4),
-    # Player(6, 5, "ia", 1, 4, ativo=True, ia_fn=ia_5),
-]
+            # Parâmetros: grid_x, grid_y, tipo, time, cor_id, ativo, ia_fn
+            # cor_id = 2 carrega "player3.png" (Bomberman Clássico)
+            Player(0, 0, "ia", 0, 2, ativo=True, ia_fn=ia_1), 
+            
+            # Os sacos de pancada ficam com as outras skins (0, 1 e 3)
+            Player(12, 0, "ia", 1, 0, ativo=True, ia_fn=ia_saco_de_pancada),
+            Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_saco_de_pancada),
+            Player(12, 10, "ia", 0, 3, ativo=True, ia_fn=ia_saco_de_pancada),
+        ]
 
 bombas = []
 pontos = [0, 0, 0, 0, 0]
@@ -469,25 +367,21 @@ mensagem_vitoria = None
 
 clock = pygame.time.Clock()
 fullscreen = False
-fast_mode = False # NOVA VARIÁVEL AQUI
+fast_mode = False
 
-# INICIALIZAÇÃO DO RELATÓRIO
 ARQUIVO_RELATORIO = "relatorio_treinamento.csv"
 episodio_atual = 1
 
-# Cria o arquivo e o cabeçalho se ele ainda não existir na pasta
 if not os.path.exists(ARQUIVO_RELATORIO):
     with open(ARQUIVO_RELATORIO, mode='w', newline='', encoding='utf-8') as f:
-        # Usa o delimitador ';' que é o padrão do Excel no Brasil
         writer = csv.writer(f, delimiter=';') 
         writer.writerow(["Episodio", "Vencedor", "Pontos_J1", "Pontos_J2", "Pontos_J3", "Pontos_J4", "Tempo_Decorrido_Segundos"])
 
 while True:
-    # SUBSTITUA A LÓGICA DO CLOCK AQUI
     if fast_mode:
-        delta = 1.0 / 60.0  # Finge que o tempo passou normalmente em 60 FPS para não quebrar a física
+        delta = 1.0 / 60.0  
     else:
-        delta = clock.tick(60) / 1000 
+        delta = min(clock.tick(60) / 1000.0, 0.1) 
 
     teclas = pygame.key.get_pressed()
 
@@ -501,32 +395,20 @@ while True:
                 screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
             else:
                 screen = pygame.display.set_mode((WIDTH, HEIGHT + HUD_HEIGHT))
-        # ADICIONE O ATALHO DO F12 AQUI
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_F12:
             fast_mode = not fast_mode
             print(f"\n[SISTEMA] Modo de Treinamento Acelerado: {'LIGADO' if fast_mode else 'DESLIGADO'}")
 
     if vencedor_final is None:
         tempo_restante -= delta
-        if tempo_restante <= 0 and vencedor_final is None:
+        if tempo_restante <= 0:
             tempo_restante = 0
             vencedor_final = pontos.index(max(pontos))
-            nome_vencedor = ""
-            if vencedor_final==0:
-                nome_vencedor = p1
-            if vencedor_final==1:
-                nome_vencedor = p2
-            if vencedor_final==2:
-                nome_vencedor = p3
-            if vencedor_final==3:
-                nome_vencedor = p4
-            if vencedor_final==4:
-                nome_vencedor = p5
-            mensagem_vitoria = f"Tempo esgotado! {nome_vencedor} venceu!"
+            nomes = [p1, p2, p3, p4, p5]
+            mensagem_vitoria = f"Tempo esgotado! {nomes[vencedor_final]} venceu!"
 
     for p in players:
-        if not p.ativo:
-            continue
+        if not p.ativo: continue
         p.atualizar(delta)
         if not p.movendo:
             acao = p.get_acao(teclas)
@@ -557,12 +439,10 @@ while True:
                 for fx, fy in b.fogo:
                     if mapa[fy][fx] == 1:
                         mapa[fy][fx] = criar_powerup(fx, fy)
-                        if b.dono:
-                            pontos[players.index(b.dono)] += PONTOS_BLOCO
+                        if b.dono: pontos[players.index(b.dono)] += PONTOS_BLOCO
                     elif mapa[fy][fx] in [3, 4]:
                         mapa[fy][fx] = 0
-                        if b.dono:
-                            pontos[players.index(b.dono)] += PONTOS_POWERUP_DESTRUIDO
+                        if b.dono: pontos[players.index(b.dono)] += PONTOS_POWERUP_DESTRUIDO
                 bombas.remove(b)
                 if b.dono and b in b.dono.bombas:
                     b.dono.bombas.remove(b)
@@ -574,75 +454,64 @@ while True:
                         p.ativo = False
                         if b.dono == p:
                             pontos[players.index(p)] -= PONTOS_MATAR_JOGADOR
-                            if pontos[players.index(p)]<0:
-                                pontos[players.index(p)]=0;
-
+                            if pontos[players.index(p)]<0: pontos[players.index(p)]=0
                         else:
                             pontos[players.index(b.dono)] += PONTOS_MATAR_JOGADOR
-                        print(f"Jogador {players.index(p)+1} morreu!")
 
+    # --- VERIFICAÇÃO DE FINAL DE JOGO (Com Early Stopping) ---
     if vencedor_final is None:
-        vivos = [p for p in players if p.ativo]
-        if len(vivos) == 1:
-            vencedor_final = players.index(vivos[0])
-            pontos[vencedor_final] += PONTOS_VITORIA
-            if vencedor_final==0:
-                nome_vencedor = p1
-            if vencedor_final==1:
-                nome_vencedor = p2
-            if vencedor_final==2:
-                nome_vencedor = p3
-            if vencedor_final==3:
-                nome_vencedor = p4
-            if vencedor_final==4:
-                nome_vencedor = p5
-            mensagem_vitoria = f"Jogador {nome_vencedor} VENCEU!"
-            
-        # NOVA CONDIÇÃO DE EMPATE AQUI
-        elif len(vivos) == 0:
-            vencedor_final = -1  # Valor falso (-1) apenas para o jogo entender que a partida acabou
-            mensagem_vitoria = "EMPATE! Ninguém sobreviveu!"
+        # Se a IA principal morrer, corta o treinamento e dá Game Over na hora
+        if not players[0].ativo:
+            vencedor_final = -2
+            mensagem_vitoria = "GAME OVER: A IA principal foi eliminada!"
+        else:
+            vivos = [p for p in players if p.ativo]
+            if len(vivos) == 1:
+                vencedor_final = players.index(vivos[0])
+                pontos[vencedor_final] += PONTOS_VITORIA
+                nomes = [p1, p2, p3, p4, p5]
+                mensagem_vitoria = f"Jogador {nomes[vencedor_final]} VENCEU!"
+            elif len(vivos) == 0:
+                vencedor_final = -1  
+                mensagem_vitoria = "EMPATE! Ninguém sobreviveu!"
 
-    screen.fill(COLOR_BG)
-    desenhar_hud(pontos, tempo_restante)
-    desenhar_mapa()
-    desenhar_bombas(bombas)
-    desenhar_jogadores(players)
-    if mensagem_vitoria:
-        texto = font_vitoria.render(mensagem_vitoria, True, (255, 255, 255))
-        rect = texto.get_rect(center=(WIDTH // 2, HEIGHT // 2 + HUD_HEIGHT // 2))
-        screen.blit(texto, rect)
-    pygame.display.flip()
+    # --- ÚNICO BLOCO DE RENDERIZAÇÃO (Protegido contra gargalo) ---
+    if not fast_mode:
+        screen.fill(COLOR_BG)
+        desenhar_hud(pontos, tempo_restante)
+        desenhar_mapa()
+        desenhar_bombas(bombas)
+        desenhar_jogadores(players)
+        if mensagem_vitoria:
+            texto = font_vitoria.render(mensagem_vitoria, True, (255, 255, 255))
+            rect = texto.get_rect(center=(WIDTH // 2, HEIGHT // 2 + HUD_HEIGHT // 2))
+            screen.blit(texto, rect)
+        pygame.display.flip()
 
+    # --- RESET DA PARTIDA E TELEMETRIA ---
     if vencedor_final is not None:
         print(mensagem_vitoria)
         
-        # --- NOVA LÓGICA DE RELATÓRIO AQUI ---
-        # Calcula quanto tempo a partida durou de fato
         tempo_decorrido = TEMPO_PARTIDA - tempo_restante
         
-        # Define o nome do vencedor ou se foi empate
         if vencedor_final == -1:
             nome_resultado = "Empate"
+        elif vencedor_final == -2:
+            nome_resultado = "Derrota (Game Over)"
         else:
-            # Extrai o nome do jogador vencedor usando as variáveis originais
             nomes = [p1, p2, p3, p4, p5]
             nome_resultado = f"Jogador {vencedor_final + 1} ({nomes[vencedor_final]})"
 
-        # Abre o CSV no modo 'a' (append) para adicionar uma nova linha sem apagar o histórico
         with open(ARQUIVO_RELATORIO, mode='a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f, delimiter=';')
             writer.writerow([
-                episodio_atual,
-                nome_resultado,
+                episodio_atual, nome_resultado,
                 pontos[0], pontos[1], pontos[2], pontos[3],
                 round(tempo_decorrido, 2)
             ])
             
-        episodio_atual += 1 # Avança o contador para a próxima rodada
-        # --- FIM DA LÓGICA DE RELATÓRIO ---
+        episodio_atual += 1
 
-        # 1. Reseta o mapa original (11 linhas x 13 colunas)
         mapa = [
             [0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0],
             [0, 2, 1, 2, 0, 2, 0, 2, 1, 2, 1, 2, 0],
@@ -657,32 +526,25 @@ while True:
             [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
         ]
         
-        # 2. Recria os jogadores em suas posições originais
         players = [
             Player(0, 0, "ia", 0, 0, ativo=True, ia_fn=ia_1),
-            Player(12, 0, "ia", 1, 1, ativo=True, ia_fn=ia_2),
-            Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_3),
-            Player(12, 10, "ia", 0, 0, ativo=True, ia_fn=ia_4),
+            Player(12, 0, "ia", 1, 1, ativo=True, ia_fn=ia_saco_de_pancada),
+            Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_saco_de_pancada),
+            Player(12, 10, "ia", 0, 0, ativo=True, ia_fn=ia_saco_de_pancada),
         ]
         
-        # 3. Limpa bombas, zera pontos (matriz com 5 elementos como o original) e reinicia o tempo
         bombas = []
         pontos = [0, 0, 0, 0, 0]
         tempo_restante = TEMPO_PARTIDA
         vencedor_final = None
         mensagem_vitoria = None
-        
-        # Pula para a próxima iteração do loop 'while True', começando o novo jogo
+        # 2. Recria os jogadores em suas posições originais com as skins corretas
+        players = [
+            Player(0, 0, "ia", 0, 2, ativo=True, ia_fn=ia_1),
+            Player(12, 0, "ia", 1, 0, ativo=True, ia_fn=ia_saco_de_pancada),
+            Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_saco_de_pancada),
+            Player(12, 10, "ia", 0, 3, ativo=True, ia_fn=ia_saco_de_pancada),
+        ]
         continue
-    # ENVOLVA TODA A RENDERIZAÇÃO NO IF
-    if not fast_mode:
-        screen.fill(COLOR_BG)
-        desenhar_hud(pontos, tempo_restante)
-        desenhar_mapa()
-        desenhar_bombas(bombas)
-        desenhar_jogadores(players)
-        if mensagem_vitoria:
-            texto = font_vitoria.render(mensagem_vitoria, True, (255, 255, 255))
-            rect = texto.get_rect(center=(WIDTH // 2, HEIGHT // 2 + HUD_HEIGHT // 2))
-            screen.blit(texto, rect)
-        pygame.display.flip()
+
+    

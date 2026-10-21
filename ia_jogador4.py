@@ -55,30 +55,50 @@ def obter_estado_simplificado(self_state, mapa, bombas):
     return f"C:{acima}_B:{abaixo}_E:{esquerda}_D:{direita}_Bomb:{bombas_ativas}_Perigo:{em_perigo}"
 
 def calcular_recompensa(estado_ant, acao_ant, estado_atual, self_state, mapa):
-    recompensa = -1  
+    recompensa = -1  # Custo de vida padrão (força a IA a agir rápido)
     x = self_state['grid_x']
     y = self_state['grid_y']
     
-    # NOVA PUNIÇÃO DE MORTE: Se a IA morreu neste frame, aplique um peso negativo massivo
+    # 1. Punição massiva por morte
     if not self_state['ativo']:
         return -1000
 
+    # 2. Punição por bater na parede (andou mas continuou no mesmo estado)
     if acao_ant in ["cima", "baixo", "esquerda", "direita"] and estado_ant == estado_atual:
-        recompensa -= 5
+        recompensa -= 10
         
+    # 3. ANTI-CAMPING: Punição por ficar parado sem necessidade
+    elif acao_ant == "parado":
+        if "Perigo:S" in estado_atual:
+            recompensa -= 50  # Ficar parado na reta da bomba é suicídio!
+        else:
+            recompensa -= 5   # Ficar parado sem fazer nada atrasa o jogo
+            
+    # 4. FARO DE CAÇA: Incentivo de aproximação aos blocos destrutíveis
+    elif acao_ant in ["cima", "baixo", "esquerda", "direita"]:
+        # Conta quantos blocos destrutíveis (código 1) estão na visão imediata do estado
+        direcoes_blocos = ["C:1", "B:1", "E:1", "D:1"]
+        blocos_ant = sum([1 for d in direcoes_blocos if d in estado_ant])
+        blocos_atual = sum([1 for d in direcoes_blocos if d in estado_atual])
+        
+        if blocos_atual > blocos_ant:
+            recompensa += 10  # Reforço positivo forte: achou um caminho para o alvo!
+        elif blocos_atual < blocos_ant:
+            recompensa -= 2   # Reforço negativo leve: está se afastando de um alvo.
+
+    # 5. ASSERITIVIDADE DA BOMBA: Punição severa por erro, recompensa múltipla por acerto
     elif acao_ant == "bomba":
-        tinha_bloco_perto = False
+        alvos_atingidos = 0
         for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
             nx, ny = x + dx, y + dy
             if 0 <= nx < 13 and 0 <= ny < 11:
                 if mapa[ny][nx] == 1:
-                    tinha_bloco_perto = True
-                    break
+                    alvos_atingidos += 1
                     
-        if tinha_bloco_perto:
-            recompensa += 20  
+        if alvos_atingidos > 0:
+            recompensa += (50 * alvos_atingidos)  
         else:
-            recompensa -= 10  
+            recompensa -= 100  
             
     return recompensa
 
