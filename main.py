@@ -7,6 +7,8 @@ import json
 import csv
 import os
 
+from ia_chefao import decidir_acao as ia_do_colega
+
 def gerar_checksum_dados(obj):
     def simplificar(o):
         if isinstance(o, list):
@@ -65,27 +67,36 @@ COLOR_GRASS = (80, 150, 80)
 COLOR_FLOOR = (160,82,45)
 COLOR_BREAKABLE = (100, 100, 100)
 COLOR_INDESTRUCTIBLE = (60, 60, 60)
-COLOR_BOMB = (0, 0, 0)
-COLOR_FIRE = (255, 150, 0)
 COLOR_PLAYERS = [(0, 200, 255), (255, 100, 100), (200, 255, 100), (255, 255, 0), (255, 255, 255)]
 
-powerup_bomba_img = pygame.transform.scale(pygame.image.load("pu_bomb.jpg"), (TILE_SIZE, TILE_SIZE))
-powerup_fogo_img = pygame.transform.scale(pygame.image.load("pu_fire.jpg"), (TILE_SIZE, TILE_SIZE))
-bloco_img = pygame.transform.scale(pygame.image.load("bloco.jpg"), (TILE_SIZE, TILE_SIZE))
+# --- INICIALIZAÇÃO DE FONTES PARA O HUD ---
+pygame.font.init()
+font = pygame.font.SysFont("Arial", 16)
+font_vitoria = pygame.font.SysFont("Arial", 20, bold=True)
+fonte_pequena = pygame.font.SysFont("arial", 20)
+fonte_grande = pygame.font.SysFont("arial", 60, bold=True)
 
-bomba_sprite = pygame.image.load("sprite_bomb_no_bg.png")
-bomb_frames = [
-    pygame.transform.scale(bomba_sprite.subsurface(pygame.Rect(i * 48, 0, 48, 48)), (TILE_SIZE, TILE_SIZE))
-    for i in range(3)
-]
+try:
+    powerup_bomba_img = pygame.transform.scale(pygame.image.load("pu_bomb.jpg"), (TILE_SIZE, TILE_SIZE))
+    powerup_fogo_img = pygame.transform.scale(pygame.image.load("pu_fire.jpg"), (TILE_SIZE, TILE_SIZE))
+    bloco_img = pygame.transform.scale(pygame.image.load("bloco.jpg"), (TILE_SIZE, TILE_SIZE))
 
-explosao_sprite = pygame.image.load("sprite_explosao.png").convert_alpha()
-explosao_frames = [
-    explosao_sprite.subsurface(pygame.Rect(i * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE))
-    for i in range(5)
-]
+    bomba_sprite = pygame.image.load("sprite_bomb_no_bg.png")
+    bomb_frames = [
+        pygame.transform.scale(bomba_sprite.subsurface(pygame.Rect(i * 48, 0, 48, 48)), (TILE_SIZE, TILE_SIZE))
+        for i in range(3)
+    ]
 
-mapa = [
+    explosao_sprite = pygame.image.load("sprite_explosao.png").convert_alpha()
+    explosao_frames = [
+        explosao_sprite.subsurface(pygame.Rect(i * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE))
+        for i in range(5)
+    ]
+except pygame.error as e:
+    print(f"Aviso: Não foi possível carregar as imagens ({e}). Usando retângulos coloridos como fallback temporário (caso suporte).")
+
+
+mapa_base = [
     [0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0],
     [0, 2, 1, 2, 0, 2, 0, 2, 1, 2, 1, 2, 0],
     [1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
@@ -99,8 +110,8 @@ mapa = [
     [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
 ]
 
-font = pygame.font.SysFont("Arial", 16)
-font_vitoria = pygame.font.SysFont("Arial", 20, bold=True)
+# Copia para não perder o layout inicial ao resetar o episódio
+mapa = [linha[:] for linha in mapa_base]
 
 def criar_powerup(x, y, prob_bomba=PROB_BOMBA, prob_fogo=PROB_FOGO):
     r = random.random()
@@ -108,15 +119,25 @@ def criar_powerup(x, y, prob_bomba=PROB_BOMBA, prob_fogo=PROB_FOGO):
     elif r < prob_bomba + prob_fogo: return 4
     return 0
 
-def desenhar_hud(pontos, tempo_restante):
+def desenhar_hud(pontos, tempo_restante, partidas_jogadas):
     pygame.draw.rect(screen, (30, 30, 30), (0, 0, WIDTH, HUD_HEIGHT))
+    
+    # Textos do jogo base
     tempo_txt = font.render(f"Tempo: {int(tempo_restante)}s", True, (255, 255, 255))
     screen.blit(tempo_txt, (10, 10))
     nomes = [p1, p2, p3, p4, p5]
     for i, p in enumerate(players):
+        if i >= len(nomes): break
         cor = COLOR_PLAYERS[i]
         txt = font.render(f"{nomes[i]}: {pontos[i]}", True, cor if p.ativo else (100, 100, 100))
         screen.blit(txt, (150 + i * 120, 10))
+
+    # --- INCLUSÃO DO CONTADOR DE PARTIDAS E DICA DE TREINO ---
+    texto_partidas = fonte_pequena.render(f"Partidas: {partidas_jogadas}", True, (255, 255, 255))
+    screen.blit(texto_partidas, (10, HUD_HEIGHT - 25))
+
+    texto_dica = fonte_pequena.render("Aperte F12 para o Modo Treino", True, (200, 200, 200))
+    screen.blit(texto_dica, (WIDTH - texto_dica.get_width() - 10, HUD_HEIGHT - 25))
 
 class Bomba:
     def __init__(self, x, y, tempo_explosao, nivel=1, dono=None):
@@ -138,7 +159,7 @@ class Bomba:
             self.anim_timer += delta_time
             if self.anim_timer >= self.anim_interval:
                 self.anim_timer = 0
-                self.anim_frame = (self.anim_frame + 1) % len(bomb_frames)
+                self.anim_frame = (self.anim_frame + 1) % 3
             if self.tempo_explosao <= 0:
                 self.explodir()
         else:
@@ -172,11 +193,15 @@ class Player:
         self.tipo = tipo
         self.time = time
         
-        sprite_sheet = pygame.image.load(f"player{cor_id+1}.png").convert_alpha()
         self.frames = []
-        for i in range(12):
-            frame = sprite_sheet.subsurface(pygame.Rect(i * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE))
-            self.frames.append(pygame.transform.scale(frame, (TILE_SIZE, TILE_SIZE)))
+        try:
+            sprite_sheet = pygame.image.load(f"player{cor_id+1}.png").convert_alpha()
+            for i in range(12):
+                frame = sprite_sheet.subsurface(pygame.Rect(i * TILE_SIZE, 0, TILE_SIZE, TILE_SIZE))
+                self.frames.append(pygame.transform.scale(frame, (TILE_SIZE, TILE_SIZE)))
+        except pygame.error:
+            # Fallback seguro para testes se a imagem falhar
+            pass
 
         self.anim_frame = 0
         self.anim_timer = 0
@@ -228,6 +253,11 @@ class Player:
                 for p in players: p.tipo = "cheat"
                 self.max_bombas = 10
                 return "bomba"
+                
+            # Trava para não soltar múltiplas bombas do ponto de vista do controlador
+            if acao == 'bomba' and self_state['bombas_ativas'] > 0:
+                acao = 'parado'
+                
             return acao
 
         return "parado"
@@ -302,36 +332,46 @@ def desenhar_jogadores(players):
             p.anim_frame = 0
 
         direcao_idx = {"cima": 0, "direita": 1, "baixo": 2, "esquerda": 3}
-        base = direcao_idx[p.ultima_direcao] * 3
-        frame = p.frames[base + p.anim_frame]
-        screen.blit(frame, (p.pixel_x, p.pixel_y + HUD_HEIGHT))
+        base = direcao_idx.get(p.ultima_direcao, 2) * 3
+        
+        if p.frames:
+            frame = p.frames[base + p.anim_frame]
+            screen.blit(frame, (p.pixel_x, p.pixel_y + HUD_HEIGHT))
+        else:
+            # Fallback
+            pygame.draw.rect(screen, (255, 0, 0), (p.pixel_x, p.pixel_y + HUD_HEIGHT, TILE_SIZE, TILE_SIZE))
 
 def desenhar_bombas(bombas):
     for b in bombas:
         if not b.explodida:
-            frame = bomb_frames[b.anim_frame]
-            screen.blit(frame, (b.x * TILE_SIZE, b.y * TILE_SIZE + HUD_HEIGHT))
+            try:
+                frame = bomb_frames[b.anim_frame]
+                screen.blit(frame, (b.x * TILE_SIZE, b.y * TILE_SIZE + HUD_HEIGHT))
+            except NameError:
+                pygame.draw.circle(screen, (0,0,0), (int(b.x * TILE_SIZE + TILE_SIZE/2), int(b.y * TILE_SIZE + HUD_HEIGHT + TILE_SIZE/2)), 20)
         else:
             for fx, fy in b.fogo:
                 pos_x = fx * TILE_SIZE
                 pos_y = fy * TILE_SIZE + HUD_HEIGHT
 
-                if (fx, fy) == (b.x, b.y):
-                    frame = explosao_frames[1]
-                elif fx == b.x:
-                    if fy < b.y:
-                        frame = explosao_frames[0] if (fx, fy - 1) not in b.fogo else explosao_frames[3]
-                    elif fy > b.y:
-                        frame = pygame.transform.rotate(explosao_frames[0], 180) if (fx, fy + 1) not in b.fogo else explosao_frames[3]
-                elif fy == b.y:
-                    if fx > b.x:
-                        frame = explosao_frames[2] if (fx + 1, fy) not in b.fogo else explosao_frames[4]
-                    elif fx < b.x:
-                        frame = pygame.transform.flip(explosao_frames[2], True, False) if (fx - 1, fy) not in b.fogo else explosao_frames[4]
-                else:
-                    frame = explosao_frames[1]
-
-                screen.blit(pygame.transform.scale(frame, (TILE_SIZE, TILE_SIZE)), (pos_x, pos_y))
+                try:
+                    if (fx, fy) == (b.x, b.y):
+                        frame = explosao_frames[1]
+                    elif fx == b.x:
+                        if fy < b.y:
+                            frame = explosao_frames[0] if (fx, fy - 1) not in b.fogo else explosao_frames[3]
+                        elif fy > b.y:
+                            frame = pygame.transform.rotate(explosao_frames[0], 180) if (fx, fy + 1) not in b.fogo else explosao_frames[3]
+                    elif fy == b.y:
+                        if fx > b.x:
+                            frame = explosao_frames[2] if (fx + 1, fy) not in b.fogo else explosao_frames[4]
+                        elif fx < b.x:
+                            frame = pygame.transform.flip(explosao_frames[2], True, False) if (fx - 1, fy) not in b.fogo else explosao_frames[4]
+                    else:
+                        frame = explosao_frames[1]
+                    screen.blit(pygame.transform.scale(frame, (TILE_SIZE, TILE_SIZE)), (pos_x, pos_y))
+                except NameError:
+                    pygame.draw.rect(screen, (255, 100, 0), (pos_x, pos_y, TILE_SIZE, TILE_SIZE))
 
 p1 = "ia_jogador1"
 p2 = "ia_jogador2"
@@ -339,21 +379,24 @@ p3 = "ia_jogador3"
 p4 = "ia_jogador4"
 p5 = "ia_jogador1"
 
-ia_1 = importlib.import_module(p1).decidir_acao
+ia_mod = importlib.import_module(p1)
+ia_1 = getattr(ia_mod, "decidir_acao")
+
+# --- IMPORTAÇÃO DA FUNÇÃO DE RESET DA IA ---
+try:
+    resetar_episodio = getattr(ia_mod, "resetar_episodio")
+except AttributeError:
+    # Se não existir ainda no arquivo de IA, criamos uma função provisória (dummy) para evitar crash.
+    # O arquivo da IA deve ter o método para zerar estado_anterior e aplicar Game Over.
+    def resetar_episodio(morreu=False):
+        pass
 
 # --- APRENDIZADO POR CURRÍCULO (SACOS DE PANCADA) ---
-# Substituímos a importação das outras IAs por uma função burra
-# para a sua IA (Jogador 1) treinar e matar com facilidade.
 def ia_saco_de_pancada(*args):
-    # Fica alternando movimentos simples e aleatórios sem soltar bombas
     return random.choice(["cima", "baixo", "esquerda", "direita", "parado"])
 
 players = [
-            # Parâmetros: grid_x, grid_y, tipo, time, cor_id, ativo, ia_fn
-            # cor_id = 2 carrega "player3.png" (Bomberman Clássico)
             Player(0, 0, "ia", 0, 2, ativo=True, ia_fn=ia_1), 
-            
-            # Os sacos de pancada ficam com as outras skins (0, 1 e 3)
             Player(12, 0, "ia", 1, 0, ativo=True, ia_fn=ia_saco_de_pancada),
             Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_saco_de_pancada),
             Player(12, 10, "ia", 0, 3, ativo=True, ia_fn=ia_saco_de_pancada),
@@ -376,6 +419,8 @@ if not os.path.exists(ARQUIVO_RELATORIO):
     with open(ARQUIVO_RELATORIO, mode='w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=';') 
         writer.writerow(["Episodio", "Vencedor", "Pontos_J1", "Pontos_J2", "Pontos_J3", "Pontos_J4", "Tempo_Decorrido_Segundos"])
+
+partidas_jogadas = 0
 
 while True:
     if fast_mode:
@@ -460,10 +505,13 @@ while True:
 
     # --- VERIFICAÇÃO DE FINAL DE JOGO (Com Early Stopping) ---
     if vencedor_final is None:
-        # Se a IA principal morrer, corta o treinamento e dá Game Over na hora
-        if not players[0].ativo:
+        if not players[0].ativo:  # A IA principal morreu
             vencedor_final = -2
             mensagem_vitoria = "GAME OVER: A IA principal foi eliminada!"
+            # Envia o aviso para a função de IA aplicar penalidade de morte e resetar o estado mental.
+            resetar_episodio(morreu=True)
+            partidas_jogadas += 1
+            
         else:
             vivos = [p for p in players if p.ativo]
             if len(vivos) == 1:
@@ -471,14 +519,20 @@ while True:
                 pontos[vencedor_final] += PONTOS_VITORIA
                 nomes = [p1, p2, p3, p4, p5]
                 mensagem_vitoria = f"Jogador {nomes[vencedor_final]} VENCEU!"
+                # A IA venceu, reseta para limpar a ação/estado na próxima partida, sem aplicar morte.
+                if vencedor_final == 0: 
+                    resetar_episodio(morreu=False)
+                partidas_jogadas += 1
+                
             elif len(vivos) == 0:
                 vencedor_final = -1  
                 mensagem_vitoria = "EMPATE! Ninguém sobreviveu!"
+                partidas_jogadas += 1
 
     # --- ÚNICO BLOCO DE RENDERIZAÇÃO (Protegido contra gargalo) ---
     if not fast_mode:
         screen.fill(COLOR_BG)
-        desenhar_hud(pontos, tempo_restante)
+        desenhar_hud(pontos, tempo_restante, partidas_jogadas)
         desenhar_mapa()
         desenhar_bombas(bombas)
         desenhar_jogadores(players)
@@ -486,6 +540,23 @@ while True:
             texto = font_vitoria.render(mensagem_vitoria, True, (255, 255, 255))
             rect = texto.get_rect(center=(WIDTH // 2, HEIGHT // 2 + HUD_HEIGHT // 2))
             screen.blit(texto, rect)
+
+        # Alerta Gigante de Treino
+        if fast_mode:  # Caso o usuário desligue renderização parcial
+            texto_alerta = fonte_grande.render("Modo Treino ativado", True, (255, 50, 50))
+            pos_x = (WIDTH // 2) - (texto_alerta.get_width() // 2)
+            pos_y = (HEIGHT // 2) - (texto_alerta.get_height() // 2) + HUD_HEIGHT
+            screen.blit(texto_alerta, (pos_x, pos_y))
+
+        pygame.display.flip()
+    else:
+        # Se estiver em Fast Mode, só atualiza o HUD e apaga o resto
+        screen.fill(COLOR_BG)
+        desenhar_hud(pontos, tempo_restante, partidas_jogadas)
+        texto_alerta = fonte_grande.render("Modo Treino Ativado", True, (255, 50, 50))
+        pos_x = (WIDTH // 2) - (texto_alerta.get_width() // 2)
+        pos_y = (HEIGHT // 2) - (texto_alerta.get_height() // 2) + HUD_HEIGHT
+        screen.blit(texto_alerta, (pos_x, pos_y))
         pygame.display.flip()
 
     # --- RESET DA PARTIDA E TELEMETRIA ---
@@ -512,39 +583,19 @@ while True:
             
         episodio_atual += 1
 
-        mapa = [
-            [0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0],
-            [0, 2, 1, 2, 0, 2, 0, 2, 1, 2, 1, 2, 0],
-            [1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-            [0, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1],
-            [0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1],
-            [1, 2, 0, 2, 1, 2, 0, 2, 1, 2, 1, 2, 1],
-            [1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1],
-            [1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1],
-            [0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
-            [0, 2, 1, 2, 0, 2, 1, 2, 0, 2, 0, 2, 0],
-            [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-        ]
-        
-        players = [
-            Player(0, 0, "ia", 0, 0, ativo=True, ia_fn=ia_1),
-            Player(12, 0, "ia", 1, 1, ativo=True, ia_fn=ia_saco_de_pancada),
-            Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_saco_de_pancada),
-            Player(12, 10, "ia", 0, 0, ativo=True, ia_fn=ia_saco_de_pancada),
-        ]
+        # Restaura o mapa original a partir da cópia base
+        mapa = [linha[:] for linha in mapa_base]
         
         bombas = []
         pontos = [0, 0, 0, 0, 0]
         tempo_restante = TEMPO_PARTIDA
         vencedor_final = None
         mensagem_vitoria = None
-        # 2. Recria os jogadores em suas posições originais com as skins corretas
+        
         players = [
             Player(0, 0, "ia", 0, 2, ativo=True, ia_fn=ia_1),
             Player(12, 0, "ia", 1, 0, ativo=True, ia_fn=ia_saco_de_pancada),
             Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_saco_de_pancada),
-            Player(12, 10, "ia", 0, 3, ativo=True, ia_fn=ia_saco_de_pancada),
+            Player(12, 10, "ia", 0, 3, ativo=True, ia_fn=ia_do_colega),
         ]
         continue
-
-    
