@@ -2,7 +2,15 @@ import random
 import json
 import os
 from collections import deque
-from heapq import heappop, heappush
+from busca_caminho import calcular_distancias_mapa, encontrar_rota
+from mapa_oficial import (
+    BLOCO,
+    PAREDE,
+    POWERUP_BOMBA,
+    POWERUP_FOGO,
+    celula_caminhavel,
+    coordenada_no_mapa,
+)
 
 try:
     from aglutinador_memoria import aglutinar_todos_arquivos, higienizar_acoes_fisicas
@@ -22,6 +30,15 @@ ARQUIVO_MEMORIA = "q_table_j1.json"
 q_table = {}
 estado_anterior = None
 acao_anterior = None
+objetivo_atual = None
+posicao_objetivo_atual = None
+distancia_objetivo_atual = None
+metricas_rota = {
+    "passos_avaliados_meta": 0,
+    "passos_aproximando_meta": 0,
+    "passos_afastando_meta": 0,
+    "passos_neutros_meta": 0,
+}
 passos = 0 
 
 if TEM_AGLUTINADOR:
@@ -50,8 +67,22 @@ def salvar_progresso():
     except Exception:
         pass
 
+
+def consumir_metricas_rota():
+    """Entrega e zera os contadores de rota do episódio encerrado."""
+    global metricas_rota
+    resultado = metricas_rota.copy()
+    metricas_rota = {
+        "passos_avaliados_meta": 0,
+        "passos_aproximando_meta": 0,
+        "passos_afastando_meta": 0,
+        "passos_neutros_meta": 0,
+    }
+    return resultado
+
 def resetar_episodio(morreu=False):
     global estado_anterior, acao_anterior, q_table, EPSILON
+    global objetivo_atual, posicao_objetivo_atual, distancia_objetivo_atual
     if morreu and estado_anterior is not None and acao_anterior is not None:
         if estado_anterior not in q_table:
             q_table[estado_anterior] = {acao: 0.0 for acao in ACOES}
@@ -60,6 +91,9 @@ def resetar_episodio(morreu=False):
         salvar_progresso()
     estado_anterior = None
     acao_anterior = None
+    objetivo_atual = None
+    posicao_objetivo_atual = None
+    distancia_objetivo_atual = None
 
 def mapear_zonas_perigo(mapa, bombas, bomba_extra=None):
     perigo = set()
@@ -81,15 +115,17 @@ def mapear_zonas_perigo(mapa, bombas, bomba_extra=None):
         for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
             for i in range(1, alcance + 1):
                 nx, ny = b.x + dx * i, b.y + dy * i
-                if not (0 <= nx < 13 and 0 <= ny < 11): break
-                if mapa[ny][nx] == 2: break
+                if not coordenada_no_mapa(mapa, nx, ny): break
+                if mapa[ny][nx] == PAREDE: break
                 perigo.add((nx, ny))
-                if mapa[ny][nx] == 1: break
+                if mapa[ny][nx] == BLOCO: break
     return perigo, ocupadas
 
 def buscar_direcao_fuga_bfs(x, y, mapa, perigo, ocupadas, max_passos=25):
     direcoes = [("C", 0, -1), ("B", 0, 1), ("E", -1, 0), ("D", 1, 0)]
-    direcoes.sort(key=lambda d: abs((x + d[1]) - 6) + abs((y + d[2]) - 5))
+    centro_x = len(mapa[0]) // 2 if mapa else 0
+    centro_y = len(mapa) // 2
+    direcoes.sort(key=lambda d: abs((x + d[1]) - centro_x) + abs((y + d[2]) - centro_y))
     
     fila = deque([(x, y, None, 0)])
     visitados = {(x, y)}
@@ -103,78 +139,129 @@ def buscar_direcao_fuga_bfs(x, y, mapa, perigo, ocupadas, max_passos=25):
 
         for nome_dir, dx, dy in direcoes:
             nx, ny = cx + dx, cy + dy
-            if 0 <= nx < 13 and 0 <= ny < 11:
-                if (nx, ny) not in visitados and mapa[ny][nx] in (0, 3, 4) and (nx, ny) not in ocupadas:
+            if coordenada_no_mapa(mapa, nx, ny):
+                if (nx, ny) not in visitados and celula_caminhavel(mapa, nx, ny) and (nx, ny) not in ocupadas:
                     visitados.add((nx, ny))
                     passo_inicial = nome_dir if primeiro_passo is None else primeiro_passo
                     fila.append((nx, ny, passo_inicial, dist + 1))
     return "Nenhuma"
 
-def calcular_farol_global(x, y, mapa, jogadores, peso_tijolo=4):
-    alvos = [(p.grid_x, p.grid_y) for p in jogadores if p.ativo and (p.grid_x != x or p.grid_y != y)]
-    
-    for row in range(len(mapa)):
-        for col in range(len(mapa[row])):
-            if mapa[row][col] in (3, 4):
-                alvos.append((col, row))
-                
-    if not alvos: return "Igual", "Igual", "Longe"
+def calcular_farol_global(x, y, mapa, jogadores, objetivo_previo=None):
+    direcoes = (("C", 0, -1), ("B", 0, 1), ("E", -1, 0), ("D", 1, 0))
+    inimigos = {
+        indice: (p.grid_x, p.grid_y)
+        for indice, p in enumerate(jogadores)
+        if p.ativo and (p.grid_x, p.grid_y) != (x, y)
+        and celula_caminhavel(mapa, p.grid_x, p.grid_y)
+    }
+    powerups = [
+        (col, row)
+        for row, linha in enumerate(mapa)
+        for col, terreno in enumerate(linha)
+        if terreno in (POWERUP_BOMBA, POWERUP_FOGO) and (col, row) != (x, y)
+    ]
 
-    dist = {}
-    fila = []
-    for ax, ay in alvos:
-        dist[(ax, ay)] = 0
-        heappush(fila, (0, ax, ay))
-
-    while fila:
-        custo, cx, cy = heappop(fila)
-        if custo > dist.get((cx, cy), 9999): continue
-        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
-            nx, ny = cx + dx, cy + dy
-            if 0 <= nx < 13 and 0 <= ny < 11 and mapa[ny][nx] != 2:
-                passo_custo = peso_tijolo if mapa[ny][nx] == 1 else 1
-                novo_custo = custo + passo_custo
-                if novo_custo < dist.get((nx, ny), 9999):
-                    dist[(nx, ny)] = novo_custo
-                    heappush(fila, (novo_custo, nx, ny))
-
-    menor_manhattan = min(abs(ax - x) + abs(ay - y) for ax, ay in alvos)
+    # Mantém a classificação antiga para não alterar a condição de bombas.
+    alvos_proximidade = list(inimigos.values()) + powerups
+    menor_manhattan = min(
+        (abs(ax - x) + abs(ay - y) for ax, ay in alvos_proximidade),
+        default=9999,
+    )
     dist_inimigo = "Perto" if menor_manhattan <= 3 else "Medio" if menor_manhattan <= 7 else "Longe"
 
-    melhor_custo = dist.get((x, y), 9999)
+    distancias_desde_ia = calcular_distancias_mapa(mapa, [(x, y)])
+    distancias_ate_inimigos = calcular_distancias_mapa(mapa, inimigos.values())
+    distancia_inimigo = distancias_ate_inimigos.get((x, y))
+
+    def posicao_do_objetivo(chave):
+        if not chave:
+            return None
+        if chave[0] == "jogador":
+            indice = chave[1]
+            if indice in inimigos:
+                return inimigos[indice]
+        elif chave[0] == "powerup":
+            posicao = (chave[1], chave[2])
+            if posicao in powerups:
+                return posicao
+        return None
+
+    # Mantém a meta enquanto ela existir e continuar alcançável.
+    alvo = posicao_do_objetivo(objetivo_previo)
+    chave_objetivo = objetivo_previo if alvo in distancias_desde_ia else None
+
+    if chave_objetivo is None:
+        if distancia_inimigo is not None:
+            powerups_no_caminho = []
+            for posicao in powerups:
+                distancia_desde_ia = distancias_desde_ia.get(posicao)
+                distancia_ate_inimigo = distancias_ate_inimigos.get(posicao)
+                if distancia_desde_ia is None or distancia_ate_inimigo is None:
+                    continue
+                desvio = distancia_desde_ia + distancia_ate_inimigo - distancia_inimigo
+                if desvio <= 2:
+                    powerups_no_caminho.append((distancia_desde_ia, desvio, posicao))
+
+            if powerups_no_caminho:
+                _, _, alvo = min(powerups_no_caminho)
+                chave_objetivo = ("powerup", alvo[0], alvo[1])
+            else:
+                inimigo_mais_proximo = min(
+                    (distancias_desde_ia[posicao], indice, posicao)
+                    for indice, posicao in inimigos.items()
+                    if posicao in distancias_desde_ia
+                )
+                _, indice, alvo = inimigo_mais_proximo
+                chave_objetivo = ("jogador", indice)
+        else:
+            powerups_alcancaveis = [
+                (distancias_desde_ia[posicao], posicao)
+                for posicao in powerups
+                if posicao in distancias_desde_ia
+            ]
+            if powerups_alcancaveis:
+                _, alvo = min(powerups_alcancaveis)
+                chave_objetivo = ("powerup", alvo[0], alvo[1])
+
+    if chave_objetivo is None or alvo is None:
+        return "Igual", "Igual", dist_inimigo, None, None, None
+
+    rota = encontrar_rota(mapa, (x, y), alvo)
+    distancia_rota = len(rota) - 1 if rota else None
     melhor_dir = None
-    for nome_dir, dx, dy in (("C", 0, -1), ("B", 0, 1), ("E", -1, 0), ("D", 1, 0)):
-        nx, ny = x + dx, y + dy
-        if 0 <= nx < 13 and 0 <= ny < 11 and mapa[ny][nx] != 2:
-            c_viz = dist.get((nx, ny), 9999)
-            if c_viz < melhor_custo:
-                melhor_custo = c_viz
-                melhor_dir = nome_dir
+    if len(rota) > 1:
+        proximo_x, proximo_y = rota[1]
+        deslocamento = (proximo_x - x, proximo_y - y)
+        melhor_dir = next(
+            (nome for nome, dx, dy in direcoes if (dx, dy) == deslocamento),
+            None,
+        )
 
-    if melhor_dir == "D": return "D", "Igual", dist_inimigo
-    if melhor_dir == "E": return "E", "Igual", dist_inimigo
-    if melhor_dir == "B": return "Igual", "B", dist_inimigo
-    if melhor_dir == "C": return "Igual", "C", dist_inimigo
-
-    alvo_prox = min(alvos, key=lambda a: abs(a[0] - x) + abs(a[1] - y))
-    dir_x = "D" if alvo_prox[0] > x else "E" if alvo_prox[0] < x else "Igual"
-    dir_y = "B" if alvo_prox[1] > y else "C" if alvo_prox[1] < y else "Igual"
-    return dir_x, dir_y, dist_inimigo
+    direcao_x = "D" if melhor_dir == "D" else "E" if melhor_dir == "E" else "Igual"
+    direcao_y = "B" if melhor_dir == "B" else "C" if melhor_dir == "C" else "Igual"
+    return direcao_x, direcao_y, dist_inimigo, chave_objetivo, alvo, distancia_rota
 
 def obter_estado_simplificado(self_state, mapa, bombas, jogadores):
+    global objetivo_atual, posicao_objetivo_atual, distancia_objetivo_atual
     x, y = self_state["grid_x"], self_state["grid_y"]
     def ver_celula(nx, ny):
-        return mapa[ny][nx] if 0 <= nx < 13 and 0 <= ny < 11 else 2  
+        return mapa[ny][nx] if coordenada_no_mapa(mapa, nx, ny) else PAREDE
     
     acima, abaixo, esquerda, direita = ver_celula(x, y - 1), ver_celula(x, y + 1), ver_celula(x - 1, y), ver_celula(x + 1, y)
     perigo, ocupadas = mapear_zonas_perigo(mapa, bombas)
     em_perigo = "S" if (x, y) in perigo else "N"
     rota_fuga = buscar_direcao_fuga_bfs(x, y, mapa, perigo, ocupadas) if em_perigo == "S" else "NA"
-    dir_x, dir_y, dist_inimigo = calcular_farol_global(x, y, mapa, jogadores)
+    (
+        dir_x, dir_y, dist_inimigo, objetivo_atual,
+        posicao_objetivo_atual, distancia_objetivo_atual,
+    ) = calcular_farol_global(x, y, mapa, jogadores, objetivo_atual)
     
     return f"C:{acima}_B:{abaixo}_E:{esquerda}_D:{direita}_Perigo:{em_perigo}_Fuga:{rota_fuga}_AlvoX:{dir_x}_AlvoY:{dir_y}_Dist:{dist_inimigo}"
 
-def calcular_recompensa(estado_ant, acao_ant, estado_atual, self_state, mapa, bombas, jogadores):
+def calcular_recompensa(
+    estado_ant, acao_ant, estado_atual, self_state, mapa, bombas, jogadores,
+    jogador_ia=None, progresso_objetivo=None,
+):
     if not self_state["ativo"]: return -500
     recompensa = -0.5
 
@@ -229,6 +316,12 @@ def calcular_recompensa(estado_ant, acao_ant, estado_atual, self_state, mapa, bo
         if not bateu_parede:
             recompensa -= 2
 
+        if "Perigo:N" in estado_ant and progresso_objetivo is not None:
+            if progresso_objetivo > 0:
+                recompensa += 4
+            elif progresso_objetivo < 0:
+                recompensa -= 2
+
     elif acao_ant == "bomba":
         limite_bombas = 1
         for key in ["bombas_limite", "max_bombas", "limite_bombas", "bomba_qtd", "bombas_maximas", "quantidade_bombas", "bombas_inventario"]:
@@ -250,15 +343,15 @@ def calcular_recompensa(estado_ant, acao_ant, estado_atual, self_state, mapa, bo
                 alvos_tijolo = 0
                 alvos_inimigo = 0
                 for p in jogadores:
-                    if p.ativo and p.grid_x == x and p.grid_y == y:
+                    if p is not jogador_ia and p.ativo and p.grid_x == x and p.grid_y == y:
                         alvos_inimigo += 1
 
                 for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
                     for i in range(1, alcance + 1):
                         nx, ny = x + dx * i, y + dy * i
-                        if 0 <= nx < 13 and 0 <= ny < 11:
-                            if mapa[ny][nx] == 2: break
-                            if mapa[ny][nx] == 1:
+                        if coordenada_no_mapa(mapa, nx, ny):
+                            if mapa[ny][nx] == PAREDE: break
+                            if mapa[ny][nx] == BLOCO:
                                 alvos_tijolo += 1
                                 break
                             for p in jogadores:
@@ -283,13 +376,13 @@ def obter_acoes_seguras(x, y, estado_atual, self_state, mapa, bombas):
         mapa_fugas = {"C": "cima", "B": "baixo", "E": "esquerda", "D": "direita"}
         if fuga_bfs in mapa_fugas:
             return [mapa_fugas[fuga_bfs]]
-        livres = [a for a, (dx, dy) in direcoes.items() if 0 <= x + dx < 13 and 0 <= y + dy < 11 and mapa[y + dy][x + dx] in (0, 3, 4)]
+        livres = [a for a, (dx, dy) in direcoes.items() if celula_caminhavel(mapa, x + dx, y + dy)]
         return livres if livres else ACOES
 
     acoes_validas = []
     for a, (dx, dy) in direcoes.items():
         nx, ny = x + dx, y + dy
-        if 0 <= nx < 13 and 0 <= ny < 11 and mapa[ny][nx] in (0, 3, 4) and (nx, ny) not in perigo and (nx, ny) not in ocupadas:
+        if celula_caminhavel(mapa, nx, ny) and (nx, ny) not in perigo and (nx, ny) not in ocupadas:
             acoes_validas.append(a)
 
     limite_bombas = 1
@@ -306,9 +399,9 @@ def obter_acoes_seguras(x, y, estado_atual, self_state, mapa, bombas):
     for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
         for i in range(1, alcance + 1):
             nx, ny = x + dx * i, y + dy * i
-            if 0 <= nx < 13 and 0 <= ny < 11:
-                if mapa[ny][nx] == 2: break 
-                if mapa[ny][nx] == 1 or dist_inimigo == "Perto": 
+            if coordenada_no_mapa(mapa, nx, ny):
+                if mapa[ny][nx] == PAREDE: break 
+                if mapa[ny][nx] == BLOCO or dist_inimigo == "Perto": 
                     tem_alvo_util = True
                     break
             else: break
@@ -328,13 +421,48 @@ def obter_acoes_seguras(x, y, estado_atual, self_state, mapa, bombas):
 
 def decidir_acao(player, mapa, jogadores, bombas, tempo_restante, pontos, hud_info, self_state):
     global q_table, estado_anterior, acao_anterior, EPSILON, passos
-    
+    global objetivo_atual, posicao_objetivo_atual, distancia_objetivo_atual
+
+    objetivo_previo = objetivo_atual
+    posicao_objetivo_previa = posicao_objetivo_atual
+    distancia_objetivo_previa = distancia_objetivo_atual
     estado_atual = obter_estado_simplificado(self_state, mapa, bombas, jogadores)
+    progresso_objetivo = None
+    if (
+        objetivo_previo is not None
+        and objetivo_previo == objetivo_atual
+        and posicao_objetivo_previa is not None
+        and distancia_objetivo_previa is not None
+    ):
+        distancias_ate_posicao_anterior = calcular_distancias_mapa(
+            mapa, [posicao_objetivo_previa]
+        )
+        distancia_atual_ate_posicao_anterior = distancias_ate_posicao_anterior.get(
+            (self_state["grid_x"], self_state["grid_y"])
+        )
+        if distancia_atual_ate_posicao_anterior is not None:
+            progresso_objetivo = (
+                distancia_objetivo_previa - distancia_atual_ate_posicao_anterior
+            )
+
+    if acao_anterior in ("cima", "baixo", "esquerda", "direita") and progresso_objetivo is not None:
+        metricas_rota["passos_avaliados_meta"] += 1
+        if progresso_objetivo > 0:
+            metricas_rota["passos_aproximando_meta"] += 1
+        elif progresso_objetivo < 0:
+            metricas_rota["passos_afastando_meta"] += 1
+        else:
+            metricas_rota["passos_neutros_meta"] += 1
+
     if estado_atual not in q_table:
         q_table[estado_atual] = {acao: 0.0 for acao in ACOES}
         
     if estado_anterior is not None and acao_anterior is not None:
-        recompensa = calcular_recompensa(estado_anterior, acao_anterior, estado_atual, self_state, mapa, bombas, jogadores)
+        recompensa = calcular_recompensa(
+            estado_anterior, acao_anterior, estado_atual,
+            self_state, mapa, bombas, jogadores,
+            jogador_ia=player, progresso_objetivo=progresso_objetivo,
+        )
         q_antigo = q_table[estado_anterior][acao_anterior]
         max_q_futuro = max(q_table[estado_atual].values())
         q_table[estado_anterior][acao_anterior] = q_antigo + ALFA * (recompensa + GAMA * max_q_futuro - q_antigo)
@@ -345,7 +473,12 @@ def decidir_acao(player, mapa, jogadores, bombas, tempo_restante, pontos, hud_in
     if random.uniform(0, 1) < EPSILON:
         acao_escolhida = random.choice(acoes_candidatas)
     else:
-        acao_escolhida = max(acoes_candidatas, key=lambda a: q_table[estado_atual].get(a, 0.0))
+        maior_valor = max(q_table[estado_atual].get(a, 0.0) for a in acoes_candidatas)
+        melhores_acoes = [
+            a for a in acoes_candidatas
+            if q_table[estado_atual].get(a, 0.0) == maior_valor
+        ]
+        acao_escolhida = random.choice(melhores_acoes)
 
     if EPSILON > EPSILON_MIN: EPSILON *= EPSILON_DECAY
 

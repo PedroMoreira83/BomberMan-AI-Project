@@ -8,6 +8,8 @@ import csv
 import os
 
 from ia_chefao import decidir_acao as ia_do_colega
+from ia_inimigo_aleatorio import InimigoAleatorio
+from mapa_oficial import ALTURA_MAPA, LARGURA_MAPA, MAPA_OFICIAL, celula_caminhavel
 
 def gerar_checksum_dados(obj):
     def simplificar(o):
@@ -41,7 +43,7 @@ pygame.init()
 
 # Parâmetros de jogo
 TILE_SIZE = 48
-ROWS, COLS = 11, 13
+ROWS, COLS = ALTURA_MAPA, LARGURA_MAPA
 HUD_HEIGHT = 60
 WIDTH, HEIGHT = COLS * TILE_SIZE, ROWS * TILE_SIZE
 TEMPO_MOVIMENTO = 0.1
@@ -96,19 +98,7 @@ except pygame.error as e:
     print(f"Aviso: Não foi possível carregar as imagens ({e}). Usando retângulos coloridos como fallback temporário (caso suporte).")
 
 
-mapa_base = [
-    [0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0],
-    [0, 2, 1, 2, 0, 2, 0, 2, 1, 2, 1, 2, 0],
-    [1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-    [0, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1],
-    [0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1],
-    [1, 2, 0, 2, 1, 2, 0, 2, 1, 2, 1, 2, 1],
-    [1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1],
-    [1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1],
-    [0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
-    [0, 2, 1, 2, 0, 2, 1, 2, 0, 2, 0, 2, 0],
-    [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-]
+mapa_base = [linha[:] for linha in MAPA_OFICIAL]
 
 # Copia para não perder o layout inicial ao resetar o episódio
 mapa = [linha[:] for linha in mapa_base]
@@ -286,10 +276,14 @@ class Player:
                     if self.max_bombas < MAX_BOMBAS: self.max_bombas += 1
                     mapa[self.grid_y][self.grid_x] = 0
                     pontos[players.index(self)] += PONTOS_POWERUP_COLETADO
+                    if self is players[0]:
+                        metricas_partida["powerups_coletados_j1"] += 1
                 elif tipo == 4:
                     if self.bomba_nivel < 4: self.bomba_nivel += 1
                     mapa[self.grid_y][self.grid_x] = 0
                     pontos[players.index(self)] += PONTOS_POWERUP_COLETADO
+                    if self is players[0]:
+                        metricas_partida["powerups_coletados_j1"] += 1
             else:
                 t = self.tempo_mov / TEMPO_MOVIMENTO
                 self.pixel_x = (1 - t) * self.pixel_x + t * self.dest_x
@@ -391,40 +385,83 @@ except AttributeError:
     def resetar_episodio(morreu=False):
         pass
 
-# --- APRENDIZADO POR CURRÍCULO (SACOS DE PANCADA) ---
-def ia_saco_de_pancada(*args):
-    return random.choice(["cima", "baixo", "esquerda", "direita", "parado"])
+salvar_progresso_ia = getattr(ia_mod, "salvar_progresso", lambda: None)
 
-players = [
-            Player(0, 0, "ia", 0, 2, ativo=True, ia_fn=ia_1), 
-            Player(12, 0, "ia", 1, 0, ativo=True, ia_fn=ia_saco_de_pancada),
-            Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_saco_de_pancada),
-            Player(12, 10, "ia", 0, 3, ativo=True, ia_fn=ia_saco_de_pancada),
-        ]
+# --- INIMIGOS DE MOVIMENTAÇÃO ALEATÓRIA ---
+inimigo_aleatorio = InimigoAleatorio()
+ia_inimigo_aleatorio = inimigo_aleatorio.decidir_acao
+
+def criar_jogadores():
+    return [
+        Player(0, 0, "ia", 0, 2, ativo=True, ia_fn=ia_1),
+        Player(12, 0, "ia", 1, 0, ativo=True, ia_fn=ia_inimigo_aleatorio),
+        Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_inimigo_aleatorio),
+        Player(12, 10, "ia", 0, 3, ativo=True, ia_fn=ia_do_colega),
+    ]
+
+
+players = criar_jogadores()
 
 bombas = []
 pontos = [0, 0, 0, 0, 0]
+metricas_partida = {
+    "bombas_colocadas_j1": 0,
+    "blocos_destruidos_j1": 0,
+    "powerups_coletados_j1": 0,
+}
 tempo_restante = TEMPO_PARTIDA
 vencedor_final = None
 mensagem_vitoria = None
 
 clock = pygame.time.Clock()
 fullscreen = False
-fast_mode = False
+fast_mode = True
+FATOR_ACELERACAO = 3.0
 
-ARQUIVO_RELATORIO = "relatorio_treinamento.csv"
-episodio_atual = 1
+ARQUIVO_RELATORIO = "relatorio_treinamento_gen21csv"
+ARQUIVO_METRICAS = "metricas_comportamento_treinamento.csv"
 
 if not os.path.exists(ARQUIVO_RELATORIO):
     with open(ARQUIVO_RELATORIO, mode='w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f, delimiter=';') 
         writer.writerow(["Episodio", "Vencedor", "Pontos_J1", "Pontos_J2", "Pontos_J3", "Pontos_J4", "Tempo_Decorrido_Segundos"])
 
+if not os.path.exists(ARQUIVO_METRICAS):
+    with open(ARQUIVO_METRICAS, mode='w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f, delimiter=';')
+        writer.writerow([
+            "Episodio", "Vencedor", "Pontos_J1", "Bombas_J1",
+            "Blocos_Destruidos_J1", "Powerups_Coletados_J1",
+            "Passos_Avaliados_Meta", "Passos_Aproximando_Meta",
+            "Passos_Afastando_Meta", "Passos_Neutros_Meta",
+            "Tempo_Decorrido_Segundos",
+        ])
+
+def obter_proximo_episodio():
+    if not os.path.exists(ARQUIVO_RELATORIO):
+        return 1
+
+    try:
+        with open(ARQUIVO_RELATORIO, mode='r', newline='', encoding='utf-8') as f:
+            episodios = [
+                int(linha[0])
+                for linha in csv.reader(f, delimiter=';')
+                if linha and linha[0].isdigit()
+            ]
+    except (OSError, ValueError):
+        return 1
+
+    return max(episodios, default=0) + 1
+
+
+episodio_atual = obter_proximo_episodio()
+
 partidas_jogadas = 0
 
 while True:
     if fast_mode:
-        delta = 1.0 / 60.0  
+        clock.tick(120)
+        delta = FATOR_ACELERACAO / 120.0
     else:
         delta = min(clock.tick(60) / 1000.0, 0.1) 
 
@@ -432,6 +469,7 @@ while True:
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
+            salvar_progresso_ia()
             pygame.quit()
             sys.exit()
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
@@ -451,6 +489,8 @@ while True:
             vencedor_final = pontos.index(max(pontos))
             nomes = [p1, p2, p3, p4, p5]
             mensagem_vitoria = f"Tempo esgotado! {nomes[vencedor_final]} venceu!"
+            resetar_episodio(morreu=not players[0].ativo)
+            partidas_jogadas += 1
 
     for p in players:
         if not p.ativo: continue
@@ -469,8 +509,10 @@ while True:
                         nova = Bomba(p.grid_x, p.grid_y, TEMPO_EXPLOSAO, p.bomba_nivel, p)
                         bombas.append(nova)
                         p.bombas.append(nova)
+                        if p is players[0]:
+                            metricas_partida["bombas_colocadas_j1"] += 1
             nx, ny = p.grid_x + dx, p.grid_y + dy
-            if 0 <= nx < COLS and 0 <= ny < ROWS and mapa[ny][nx] in [0, 3, 4]:
+            if celula_caminhavel(mapa, nx, ny):
                 existe_bomba = any(b.x == nx and b.y == ny and not b.explodida for b in bombas)
                 bomba_sob_player = any(b.x == p.grid_x and b.y == p.grid_y and not b.explodida for b in p.bombas)
                 if not existe_bomba or (nx == p.grid_x and ny == p.grid_y and bomba_sob_player):
@@ -484,7 +526,10 @@ while True:
                 for fx, fy in b.fogo:
                     if mapa[fy][fx] == 1:
                         mapa[fy][fx] = criar_powerup(fx, fy)
-                        if b.dono: pontos[players.index(b.dono)] += PONTOS_BLOCO
+                        if b.dono:
+                            pontos[players.index(b.dono)] += PONTOS_BLOCO
+                            if b.dono is players[0]:
+                                metricas_partida["blocos_destruidos_j1"] += 1
                     elif mapa[fy][fx] in [3, 4]:
                         mapa[fy][fx] = 0
                         if b.dono: pontos[players.index(b.dono)] += PONTOS_POWERUP_DESTRUIDO
@@ -580,6 +625,23 @@ while True:
                 pontos[0], pontos[1], pontos[2], pontos[3],
                 round(tempo_decorrido, 2)
             ])
+
+        metricas_rota = getattr(ia_mod, "consumir_metricas_rota", lambda: {})()
+        with open(ARQUIVO_METRICAS, mode='a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, delimiter=';')
+            writer.writerow([
+                episodio_atual, nome_resultado, pontos[0],
+                metricas_partida["bombas_colocadas_j1"],
+                metricas_partida["blocos_destruidos_j1"],
+                metricas_partida["powerups_coletados_j1"],
+                metricas_rota.get("passos_avaliados_meta", 0),
+                metricas_rota.get("passos_aproximando_meta", 0),
+                metricas_rota.get("passos_afastando_meta", 0),
+                metricas_rota.get("passos_neutros_meta", 0),
+                round(tempo_decorrido, 2),
+            ])
+
+        salvar_progresso_ia()
             
         episodio_atual += 1
 
@@ -588,14 +650,15 @@ while True:
         
         bombas = []
         pontos = [0, 0, 0, 0, 0]
+        metricas_partida = {
+            "bombas_colocadas_j1": 0,
+            "blocos_destruidos_j1": 0,
+            "powerups_coletados_j1": 0,
+        }
         tempo_restante = TEMPO_PARTIDA
         vencedor_final = None
         mensagem_vitoria = None
         
-        players = [
-            Player(0, 0, "ia", 0, 2, ativo=True, ia_fn=ia_1),
-            Player(12, 0, "ia", 1, 0, ativo=True, ia_fn=ia_saco_de_pancada),
-            Player(0, 10, "ia", 1, 1, ativo=True, ia_fn=ia_saco_de_pancada),
-            Player(12, 10, "ia", 0, 3, ativo=True, ia_fn=ia_do_colega),
-        ]
+        players = criar_jogadores()
         continue
+
