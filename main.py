@@ -418,7 +418,7 @@ fullscreen = False
 fast_mode = True
 FATOR_ACELERACAO = 3.0
 
-ARQUIVO_RELATORIO = "relatorio_treinamento_gen21csv"
+ARQUIVO_RELATORIO = "relatorio_treinamento.csv"
 ARQUIVO_METRICAS = "metricas_comportamento_treinamento.csv"
 
 if not os.path.exists(ARQUIVO_RELATORIO):
