@@ -2,15 +2,98 @@ import random
 import json
 import os
 from collections import deque
-from busca_caminho import calcular_distancias_mapa, encontrar_rota
-from mapa_oficial import (
-    BLOCO,
-    PAREDE,
-    POWERUP_BOMBA,
-    POWERUP_FOGO,
-    celula_caminhavel,
-    coordenada_no_mapa,
-)
+
+# Valores do mapa usados pelo jogo: chão, bloco, parede e power-ups.
+# As funções abaixo ficam neste arquivo para que o jogador não dependa dos
+# módulos auxiliares busca_caminho.py e mapa_oficial.py.
+CHAO = 0
+BLOCO = 1
+PAREDE = 2
+POWERUP_BOMBA = 3
+POWERUP_FOGO = 4
+TERRENOS_LIVRES = frozenset({CHAO, POWERUP_BOMBA, POWERUP_FOGO})
+
+
+def coordenada_no_mapa(mapa, x, y):
+    """Verifica se a coordenada existe no mapa recebido do jogo."""
+    return 0 <= y < len(mapa) and 0 <= x < len(mapa[y])
+
+
+def celula_caminhavel(mapa, x, y):
+    """Informa se a posição está dentro do mapa e pode ser atravessada."""
+    return (
+        coordenada_no_mapa(mapa, x, y)
+        and mapa[y][x] in TERRENOS_LIVRES
+    )
+
+
+def calcular_distancias_mapa(mapa, origens, bloqueadas=()):
+    """Calcula por BFS a distância em passos desde as origens alcançáveis."""
+    bloqueadas = set(bloqueadas)
+    distancias = {
+        origem: 0
+        for origem in origens
+        if celula_caminhavel(mapa, *origem) and origem not in bloqueadas
+    }
+    fila = deque(distancias)
+
+    while fila:
+        x, y = fila.popleft()
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            vizinho = (x + dx, y + dy)
+            if (
+                celula_caminhavel(mapa, *vizinho)
+                and vizinho not in bloqueadas
+                and vizinho not in distancias
+            ):
+                distancias[vizinho] = distancias[(x, y)] + 1
+                fila.append(vizinho)
+
+    return distancias
+
+
+def encontrar_rota(mapa, inicio, alvo, bloqueadas=()):
+    """Retorna a menor rota BFS ou lista vazia se o alvo não for alcançável."""
+    if not mapa or not mapa[0]:
+        return []
+
+    largura = len(mapa[0])
+    if any(len(linha) != largura for linha in mapa):
+        raise ValueError("O mapa precisa ser retangular.")
+
+    bloqueadas = set(bloqueadas)
+
+    def caminhavel(posicao):
+        x, y = posicao
+        return celula_caminhavel(mapa, x, y) and posicao not in bloqueadas
+
+    if not caminhavel(inicio) or not caminhavel(alvo):
+        return []
+
+    fila = deque([inicio])
+    anterior = {inicio: None}
+    while fila:
+        atual = fila.popleft()
+        if atual == alvo:
+            break
+
+        x, y = atual
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            vizinho = (x + dx, y + dy)
+            if caminhavel(vizinho) and vizinho not in anterior:
+                anterior[vizinho] = atual
+                fila.append(vizinho)
+
+    if alvo not in anterior:
+        return []
+
+    rota = []
+    atual = alvo
+    while atual is not None:
+        rota.append(atual)
+        atual = anterior[atual]
+    rota.reverse()
+    return rota
 
 try:
     from aglutinador_memoria import aglutinar_todos_arquivos, higienizar_acoes_fisicas
@@ -308,9 +391,9 @@ def calcular_recompensa(
 
         if progresso_objetivo is not None:
             if progresso_objetivo > 0:
-                recompensa += 4
+                recompensa += 8
             elif progresso_objetivo < 0:
-                recompensa -= 2
+                recompensa -= 8
 
     elif acao_ant == "bomba":
         limite_bombas = 1
